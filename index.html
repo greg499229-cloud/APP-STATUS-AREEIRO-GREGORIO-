@@ -216,13 +216,14 @@ body {
 .pendencia-item {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
     background: #242424;
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 3px 6px;
-    margin-bottom: 3px;
-    font-size: 10px;
+    border-left: 3px solid #ffb84d;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 15px;
 }
 
 .pendencia-top-row {
@@ -232,13 +233,13 @@ body {
     gap: 8px;
 }
 
-.pendencia-texto { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pendencia-texto { flex: 1; overflow-wrap: break-word; }
 .pendencia-texto b { color: #ffb84d; }
 
 .pendencia-nota-row {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 
 .pendencia-nota-input {
@@ -246,10 +247,10 @@ body {
     min-width: 0;
     background: #1a1a1a;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 6px;
     color: var(--text-main);
-    font-size: 10px;
-    padding: 2px 5px;
+    font-size: 14px;
+    padding: 8px 10px;
     outline: none;
     font-family: inherit;
 }
@@ -261,9 +262,9 @@ body {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 20px;
     line-height: 1;
-    padding: 0 2px;
+    padding: 0 4px;
     flex-shrink: 0;
 }
 .pendencia-del:hover { color: var(--accent-red); }
@@ -333,16 +334,16 @@ body {
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 18px;
 }
 
 .mf-field label {
     display: block;
     font-size: 11px;
     font-weight: 700;
-    color: var(--text-muted);
+    color: var(--text-main);
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.5px;
     margin-bottom: 6px;
 }
 
@@ -366,8 +367,10 @@ body {
     align-items: center;
     gap: 8px;
     color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 10px;
+    font-weight: 400;
+    opacity: 0.6;
+    margin: -4px 0;
 }
 .mf-divisor::before, .mf-divisor::after {
     content: "";
@@ -403,9 +406,18 @@ body {
 .mf-lista-titulo {
     font-size: 11px;
     font-weight: 700;
-    color: var(--text-muted);
+    color: var(--text-main);
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.5px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+}
+
+.mf-lista-titulo .contador {
+    color: var(--text-muted);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
 }
 
 #mfOutroWrapper { display: none; }
@@ -499,7 +511,12 @@ body {
         </div>
 
         <div class="mf-field">
-            <div class="mf-lista-titulo" style="margin-bottom:8px;">Itens já registrados</div>
+            <label>Nota de manutenção</label>
+            <input type="text" class="mf-input" id="mfNotaInput" placeholder="Opcional — deixe em branco se ainda não tiver">
+        </div>
+
+        <div class="mf-field">
+            <div class="mf-lista-titulo" style="margin-bottom:8px;">Itens já registrados <span class="contador" id="contadorItensLista"></span></div>
             <div id="listaPendenciasModal">
                 <div class="pendencia-vazio">Nenhum defeito registrado ainda.</div>
             </div>
@@ -577,7 +594,7 @@ let historico = [];
 let ordemAcoes = []; // guarda o "tipo" de cada entrada do histórico (manual, equipamento, linha, data)
 let proximoTipoAcao = { tipo: 'manual' }; // definido antes de cada pintura, para saber o que desfazer depois
 let suprimirHistorico = false; // true durante reconstruções em lote (evita centenas de leituras/gravações pesadas)
-let dataDesenhada = false; // se o carimbo de data já foi desenhado, sincronizado com o Firestore
+let dataRegistrada = null; // guarda a data exata do carimbo (ex: "07/07/2026"), sincronizada com o Firestore
 
 // ==================== MODO EDIÇÃO / SOMENTE VISUALIZAÇÃO ====================
 const PIN_EDICAO = "4992"; // troque este número para definir a senha de edição
@@ -747,11 +764,10 @@ function ocultarLoading() {
 const POSICAO_DATA = { x: 223, y: 88 };
 const btnData = document.getElementById('toolData');
 
-function desenharDataAutomatica() {
+function desenharDataAutomatica(dataParaDesenhar) {
     if (!imagemCarregada) return;
 
-    const hoje = new Date();
-    const dataFormatada = hoje.toLocaleDateString('pt-BR');
+    const dataFormatada = dataParaDesenhar || new Date().toLocaleDateString('pt-BR');
 
     const tamanhoFonte = Math.max(14, Math.floor(canvas.width * 0.018));
 
@@ -905,7 +921,7 @@ function repintarMapaCompleto() {
             if (ponto) executarBaldeDeTinta(ponto.x, ponto.y, COR_VERMELHO_DEFEITO);
         }
     });
-    if (dataDesenhada) desenharDataAutomatica();
+    if (dataRegistrada) desenharDataAutomatica(dataRegistrada);
 }
 
 function concluirCarregamento(imgOriginal) {
@@ -966,9 +982,10 @@ function atualizarDoBanco() {
 // ==================== EVENTOS DO MAPA ====================
 btnData.onclick = function() {
     if (!imagemCarregada) return;
-    proximoTipoAcao = { tipo: 'data' };
-    desenharDataAutomatica();
-    dataDesenhada = true;
+    const dataAnterior = dataRegistrada;
+    dataRegistrada = new Date().toLocaleDateString('pt-BR');
+    proximoTipoAcao = { tipo: 'data', anterior: dataAnterior };
+    desenharDataAutomatica(dataRegistrada);
     enviarEstadoParaFirestore();
 };
 
@@ -997,7 +1014,7 @@ document.getElementById('undoBtn').addEventListener('click', () => {
             estadoNivelAreia[acaoDesfeita.nome] = acaoDesfeita.anterior;
             enviarEstadoParaFirestore();
         } else if (acaoDesfeita.tipo === 'data') {
-            dataDesenhada = false;
+            dataRegistrada = acaoDesfeita.anterior || null;
             enviarEstadoParaFirestore();
         }
     }
@@ -1248,11 +1265,16 @@ let estadoNivelAreia = {};
 let aplicandoAtualizacaoRemota = false; // evita loop ao reaplicar dados recebidos do servidor
 let dadosRemotosPendentes = null; // guarda dados recebidos antes da imagem terminar de carregar
 
+// Tolerância bem menor que a das linhas: os 3 níveis do SILO 01 ficam a
+// só ~18px um do outro, então uma tolerância grande faria o toque num
+// nível acabar alternando o vizinho por engano.
+const RAIO_TOQUE_NIVEL = 8;
+
 // Retorna o nome do ponto de nível de areia se o clique caiu perto dele, ou null.
 function encontrarNivelPorClique(x, y) {
     for (const nome in MAPA_NIVEL_AREIA) {
         const p = MAPA_NIVEL_AREIA[nome];
-        if (Math.hypot(p.x - x, p.y - y) <= RAIO_TOQUE_LINHA) return nome;
+        if (Math.hypot(p.x - x, p.y - y) <= RAIO_TOQUE_NIVEL) return nome;
     }
     return null;
 }
@@ -1281,7 +1303,7 @@ function salvarEstadoLocalCompleto() {
             pendencias: pendencias,
             linhas: estadoLinhas,
             niveis: estadoNivelAreia,
-            dataDesenhada: dataDesenhada,
+            dataRegistrada: dataRegistrada,
             ultimaAlteracao: ultimaAlteracao
         }));
     } catch (e) {
@@ -1298,7 +1320,7 @@ function enviarEstadoParaFirestore() {
             pendencias: pendencias,
             linhas: estadoLinhas,
             niveis: estadoNivelAreia,
-            dataDesenhada: dataDesenhada,
+            dataRegistrada: dataRegistrada,
             ultimaAlteracao: ultimaAlteracao
         });
     }
@@ -1313,7 +1335,7 @@ window.aplicarDadosRemotos = function(dados) {
     pendencias = dados.pendencias || [];
     estadoLinhas = dados.linhas || {};
     estadoNivelAreia = dados.niveis || {};
-    dataDesenhada = !!dados.dataDesenhada;
+    dataRegistrada = dados.dataRegistrada || null;
     ultimaAlteracao = dados.ultimaAlteracao || null;
     renderizarUltimaAlteracao();
     salvarEstadoLocalCompleto();
@@ -1375,6 +1397,7 @@ const filtroSilos = document.getElementById('filtroSilos');
 const selectDefeito = document.getElementById('selectDefeito');
 const mfOutroWrapper = document.getElementById('mfOutroWrapper');
 const mfOutroInput = document.getElementById('mfOutroInput');
+const mfNotaInput = document.getElementById('mfNotaInput');
 const adicionarDefeitoBtn = document.getElementById('adicionarDefeitoBtn');
 const listaPendenciasModal = document.getElementById('listaPendenciasModal');
 const badgeDefeitos = document.getElementById('badgeDefeitos');
@@ -1415,7 +1438,7 @@ function carregarEstadoLocalDoStorage() {
             pendencias = dados.pendencias || [];
             estadoLinhas = dados.linhas || {};
             estadoNivelAreia = dados.niveis || {};
-            dataDesenhada = !!dados.dataDesenhada;
+            dataRegistrada = dados.dataRegistrada || null;
             ultimaAlteracao = dados.ultimaAlteracao || null;
             return;
         }
@@ -1496,6 +1519,8 @@ function renderizarPendencias() {
     if (focoNotaAtivo) return;
 
     const total = pendencias.length;
+
+    document.getElementById('contadorItensLista').textContent = total > 0 ? '(' + total + ')' : '';
 
     compartilharBtn.disabled = total === 0;
 
@@ -1610,7 +1635,10 @@ adicionarDefeitoBtn.addEventListener('click', function() {
 
     if (!equipamento || !defeito) return;
 
-    pendencias.push({ equipamento: equipamento, defeito: defeito, nota: "", autor: nomeUsuario || 'Anônimo' });
+    const notaDigitada = mfNotaInput.value.trim();
+    const nota = notaDigitada || 'Aguardando nota de manutenção';
+
+    pendencias.push({ equipamento: equipamento, defeito: defeito, nota: nota, autor: nomeUsuario || 'Anônimo' });
     registrarAtividade('Registrou defeito em ' + equipamento + ': ' + defeito);
     salvarPendenciasNoStorage();
     renderizarPendencias();
@@ -1623,6 +1651,7 @@ adicionarDefeitoBtn.addEventListener('click', function() {
     selectDefeito.value = "";
     mfOutroInput.value = "";
     mfOutroWrapper.style.display = 'none';
+    mfNotaInput.value = "";
     atualizarEstadoBotaoAdicionar();
 });
 

@@ -941,6 +941,7 @@ function concluirCarregamento(imgOriginal) {
     salvarEstado();
 
     document.getElementById('downloadBtn').disabled = false;
+    compartilharBtn.disabled = false;
     initPanzoom();
     ocultarLoading();
     renderizarUltimaAlteracao();
@@ -1311,18 +1312,55 @@ function salvarEstadoLocalCompleto() {
     }
 }
 
+// Guarda o último estado que ESTE aparelho mandou pro Firestore, para
+// reconhecer quando uma atualização recebida é só a confirmação da nossa
+// própria escrita (e não uma mudança de outra pessoa).
+let ultimoEstadoEnviado = null;
+
+// Compara duas versões do estado (pendências, linhas, níveis e data),
+// ignorando presença/última-alteração que mudam com frequência à parte.
+function estadosIguais(a, b) {
+    const pa = a.pendencias || [], pb = b.pendencias || [];
+    if (pa.length !== pb.length) return false;
+    for (let i = 0; i < pa.length; i++) {
+        const p1 = pa[i], p2 = pb[i];
+        if (!p2 || p1.equipamento !== p2.equipamento || p1.defeito !== p2.defeito || p1.nota !== p2.nota) return false;
+    }
+
+    const la = a.linhas || {}, lb = b.linhas || {};
+    const chavesLinhas = new Set([...Object.keys(la), ...Object.keys(lb)]);
+    for (const k of chavesLinhas) { if (la[k] !== lb[k]) return false; }
+
+    const na = a.niveis || {}, nb = b.niveis || {};
+    const chavesNiveis = new Set([...Object.keys(na), ...Object.keys(nb)]);
+    for (const k of chavesNiveis) { if (na[k] !== nb[k]) return false; }
+
+    return (a.dataRegistrada || null) === (b.dataRegistrada || null);
+}
+
 // Envia o estado atual (pendências + linhas) para o Firestore, visível a todos os usuários.
 function enviarEstadoParaFirestore() {
     salvarEstadoLocalCompleto();
     if (aplicandoAtualizacaoRemota) return;
     if (typeof window.firestoreSalvarEstado === 'function') {
-        window.firestoreSalvarEstado({
+        const dados = {
             pendencias: pendencias,
             linhas: estadoLinhas,
             niveis: estadoNivelAreia,
             dataRegistrada: dataRegistrada,
             ultimaAlteracao: ultimaAlteracao
-        });
+        };
+        // Guarda uma CÓPIA (não a referência viva) — se pendencias/estadoLinhas/
+        // estadoNivelAreia mudarem de novo antes do Firestore confirmar este
+        // envio, a comparação em estadosIguais precisa comparar contra o que
+        // foi mandado NESTE momento, não contra o estado atual (que já mudou).
+        ultimoEstadoEnviado = {
+            pendencias: pendencias.map(p => Object.assign({}, p)),
+            linhas: Object.assign({}, estadoLinhas),
+            niveis: Object.assign({}, estadoNivelAreia),
+            dataRegistrada: dataRegistrada
+        };
+        window.firestoreSalvarEstado(dados);
     }
 }
 
@@ -1330,17 +1368,26 @@ function enviarEstadoParaFirestore() {
 window.aplicarDadosRemotos = function(dados) {
     if (!imagemCarregada) { dadosRemotosPendentes = dados; return; }
 
+    // Presença e "última alteração" são leves e sempre atualizados na hora,
+    // seja eco da nossa própria escrita ou mudança de outra pessoa.
+    renderizarPresenca(dados.presencas || {});
+    ultimaAlteracao = dados.ultimaAlteracao || null;
+    renderizarUltimaAlteracao();
+
+    // Se o que chegou é exatamente o que ESTE aparelho acabou de enviar, é só
+    // a confirmação do Firestore — não precisa reconstruir nada (evita o
+    // delay de repintar tudo de novo e evita apagar o Desfazer à toa).
+    if (ultimoEstadoEnviado && estadosIguais(dados, ultimoEstadoEnviado)) {
+        return;
+    }
+
     aplicandoAtualizacaoRemota = true;
 
     pendencias = dados.pendencias || [];
     estadoLinhas = dados.linhas || {};
     estadoNivelAreia = dados.niveis || {};
     dataRegistrada = dados.dataRegistrada || null;
-    ultimaAlteracao = dados.ultimaAlteracao || null;
-    renderizarUltimaAlteracao();
     salvarEstadoLocalCompleto();
-
-    renderizarPresenca(dados.presencas || {});
 
     // Reconstrói o mapa inteiro de uma vez. Suprime o histórico de desfazer
     // durante a reconstrução para não gerar dezenas de leituras/gravações
@@ -1521,8 +1568,6 @@ function renderizarPendencias() {
     const total = pendencias.length;
 
     document.getElementById('contadorItensLista').textContent = total > 0 ? '(' + total + ')' : '';
-
-    compartilharBtn.disabled = total === 0;
 
     if (total === 0) {
         badgeDefeitos.style.display = 'none';

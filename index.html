@@ -299,6 +299,16 @@ body {
     border-top: 1px solid #6b1e1e;
 }
 
+.nome-usuario-display {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 6px 8px;
+    border-bottom: 1px dashed var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 .pendencia-vazio {
     font-size: 11px;
     color: var(--text-muted);
@@ -462,6 +472,7 @@ body {
             <button class="btn" id="undoBtn" disabled>↩️ Desfazer</button>
             <button class="btn" id="atualizarBtn">🔄 Atualizar</button>
             <button class="btn" id="lockBtn">🔒 Visualização</button>
+            <span class="nome-usuario-display" id="nomeUsuarioDisplay" style="display:none;" title="Toque duas vezes para trocar seu nome"></span>
         </div>
         <div class="presenca-row" id="presencaRow" style="display:none;"></div>
         <div class="ultima-alteracao-row" id="ultimaAlteracaoRow" style="display:none;"></div>
@@ -714,6 +725,14 @@ function aplicarModoInterface() {
     const lockBtn = document.getElementById('lockBtn');
     lockBtn.textContent = modoEdicao ? '🔓 Edição' : '🔒 Visualização';
 
+    const nomeDisplay = document.getElementById('nomeUsuarioDisplay');
+    if (modoEdicao && nomeUsuario) {
+        nomeDisplay.textContent = '👤 ' + nomeUsuario;
+        nomeDisplay.style.display = 'inline-block';
+    } else {
+        nomeDisplay.style.display = 'none';
+    }
+
     [
         document.getElementById('toolData'),
         document.getElementById('filtroVasos'),
@@ -742,6 +761,19 @@ function aplicarModoInterface() {
 
     renderizarPendencias();
 }
+
+document.getElementById('nomeUsuarioDisplay').addEventListener('dblclick', function() {
+    if (!modoEdicao) return;
+    let novoNome = prompt('Trocar seu nome:', nomeUsuario || '');
+    if (novoNome === null) return; // cancelou
+    novoNome = novoNome.trim();
+    if (!novoNome) return;
+
+    nomeUsuario = novoNome;
+    localStorage.setItem('nome_usuario', nomeUsuario);
+    aplicarModoInterface();
+    atualizarPresenca(); // reflete o novo nome pra todo mundo na hora, sem esperar o próximo heartbeat
+});
 
 document.getElementById('lockBtn').addEventListener('click', function() {
     if (modoEdicao) {
@@ -1572,7 +1604,6 @@ filtroVasos.addEventListener('change', function() {
     if (this.value !== "") {
         filtroSilos.value = "";
         filtroSilos.disabled = true;
-        pintarEquipamentoAutomatico(this.value);
     } else {
         filtroSilos.disabled = false;
     }
@@ -1583,7 +1614,6 @@ filtroSilos.addEventListener('change', function() {
     if (this.value !== "") {
         filtroVasos.value = "";
         filtroVasos.disabled = true;
-        pintarEquipamentoAutomatico(this.value);
     } else {
         filtroVasos.disabled = false;
     }
@@ -1750,6 +1780,7 @@ adicionarDefeitoBtn.addEventListener('click', function() {
     const nota = notaDigitada || 'Aguardando nota de manutenção';
 
     pendencias.push({ equipamento: equipamento, defeito: defeito, nota: nota, autor: nomeUsuario || 'Anônimo' });
+    pintarEquipamentoAutomatico(equipamento);
     registrarAtividade('Registrou defeito em ' + equipamento + ': ' + defeito);
     salvarPendenciasNoStorage();
     renderizarPendencias();

@@ -283,6 +283,22 @@ body {
     color: var(--text-muted);
 }
 
+.status-conexao {
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    background: #4a2a0a;
+    color: #ffb84d;
+    border-top: 1px solid #6b3d10;
+}
+.status-conexao.erro {
+    background: #4a1414;
+    color: #ff8080;
+    border-top: 1px solid #6b1e1e;
+}
+
 .pendencia-vazio {
     font-size: 11px;
     color: var(--text-muted);
@@ -449,6 +465,7 @@ body {
         </div>
         <div class="presenca-row" id="presencaRow" style="display:none;"></div>
         <div class="ultima-alteracao-row" id="ultimaAlteracaoRow" style="display:none;"></div>
+        <div class="status-conexao" id="statusConexao" style="display:none;"></div>
     </header>
 
     <div class="main-layout">
@@ -547,9 +564,13 @@ body {
     const docRef = doc(db, "sistema_areia", "estado_atual");
 
     // Chamada pelo script principal sempre que algo muda localmente (pendência ou linha).
+    // Salva ou avisa o app se a gravação falhar (ex: sem internet).
     window.firestoreSalvarEstado = function(dados) {
-        setDoc(docRef, dados, { merge: true }).catch(function(e) {
+        setDoc(docRef, dados, { merge: true }).then(function() {
+            if (typeof window.avisarSincronizacaoOk === 'function') window.avisarSincronizacaoOk();
+        }).catch(function(e) {
             console.error("Erro ao salvar no Firestore:", e);
+            if (typeof window.avisarErroSincronizacao === 'function') window.avisarErroSincronizacao();
         });
     };
 
@@ -571,16 +592,22 @@ body {
     window.firestoreBuscarUmaVez = function() {
         return getDoc(docRef).then(function(snapshot) {
             return snapshot.exists() ? snapshot.data() : null;
+        }).catch(function(e) {
+            console.error("Erro ao buscar do Firestore:", e);
+            if (typeof window.avisarErroSincronizacao === 'function') window.avisarErroSincronizacao();
+            throw e;
         });
     };
 
     // Recebe em tempo real as mudanças feitas por qualquer usuário (incluindo os próprios).
     onSnapshot(docRef, function(snapshot) {
+        if (typeof window.avisarSincronizacaoOk === 'function') window.avisarSincronizacaoOk();
         if (snapshot.exists() && typeof window.aplicarDadosRemotos === 'function') {
             window.aplicarDadosRemotos(snapshot.data());
         }
     }, function(e) {
         console.error("Erro ao escutar o Firestore:", e);
+        if (typeof window.avisarErroSincronizacao === 'function') window.avisarErroSincronizacao();
     });
 </script>
 
@@ -976,8 +1003,47 @@ function atualizarDoBanco() {
     }).catch(function(e) {
         console.error("Erro ao atualizar do banco de dados:", e);
         ocultarLoading();
-        alert("Não foi possível atualizar agora. Verifique sua internet.");
+        avisarErroSincronizacao();
     });
+}
+
+// ==================== AVISO DE CONEXÃO / SINCRONIZAÇÃO ====================
+const statusConexao = document.getElementById('statusConexao');
+let timeoutOcultarStatus = null;
+
+function avisarErroSincronizacao() {
+    clearTimeout(timeoutOcultarStatus);
+    statusConexao.textContent = navigator.onLine
+        ? '⚠️ Não foi possível sincronizar agora. Tentando de novo...'
+        : '⚠️ Sem conexão — as alterações serão enviadas quando a internet voltar';
+    statusConexao.classList.add('erro');
+    statusConexao.style.display = 'block';
+}
+
+function avisarSincronizacaoOk() {
+    if (statusConexao.style.display === 'none') return; // não tinha aviso nenhum, não precisa fazer nada
+    statusConexao.textContent = '✅ Conexão restabelecida';
+    statusConexao.classList.remove('erro');
+    clearTimeout(timeoutOcultarStatus);
+    timeoutOcultarStatus = setTimeout(function() {
+        statusConexao.style.display = 'none';
+    }, 2500);
+}
+
+window.avisarErroSincronizacao = avisarErroSincronizacao;
+window.avisarSincronizacaoOk = avisarSincronizacaoOk;
+
+window.addEventListener('offline', function() {
+    statusConexao.textContent = '⚠️ Sem conexão — as alterações serão enviadas quando a internet voltar';
+    statusConexao.classList.add('erro');
+    statusConexao.style.display = 'block';
+});
+window.addEventListener('online', avisarSincronizacaoOk);
+
+if (!navigator.onLine) {
+    statusConexao.textContent = '⚠️ Sem conexão — as alterações serão enviadas quando a internet voltar';
+    statusConexao.classList.add('erro');
+    statusConexao.style.display = 'block';
 }
 
 // ==================== EVENTOS DO MAPA ====================

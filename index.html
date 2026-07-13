@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>STATUS AREEIRO PIAL</title>
 <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root {
     --bg-dark: #121212;
@@ -446,6 +448,38 @@ body {
     letter-spacing: 0;
 }
 
+.dash-cards {
+    display: flex;
+    gap: 10px;
+}
+.dash-card {
+    flex: 1;
+    background: #242424;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+}
+.dash-card-titulo {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.dash-card-valor {
+    font-size: 24px;
+    font-weight: 800;
+    color: #ffb84d;
+    margin: 4px 0 8px 0;
+}
+.dash-card-linha {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+.dash-card-linha b { color: var(--text-main); }
+.dash-positivo { color: #3ABE55 !important; font-weight: 700; }
+.dash-negativo { color: #dc2626 !important; font-weight: 700; }
+
 #mfOutroWrapper { display: none; }
 </style>
 </head>
@@ -472,6 +506,7 @@ body {
             <button class="btn" id="undoBtn" disabled>↩️ Desfazer</button>
             <button class="btn" id="atualizarBtn">🔄 Atualizar</button>
             <button class="btn" id="lockBtn">🔒 Visualização</button>
+            <button class="btn" id="historicoBtn">📜 Histórico</button>
             <span class="nome-usuario-display" id="nomeUsuarioDisplay" style="display:none;" title="Toque duas vezes para trocar seu nome"></span>
         </div>
         <div class="presenca-row" id="presencaRow" style="display:none;"></div>
@@ -556,10 +591,60 @@ body {
     </div>
 </div>
 
+<!-- MODAL FULLSCREEN DE HISTÓRICO -->
+<div id="modalHistorico" class="modal-fullscreen">
+    <div class="mf-header">
+        <button class="mf-voltar" id="fecharHistoricoBtn">← Voltar</button>
+        <span class="mf-title">📜 Histórico de Relatórios</span>
+    </div>
+
+    <div class="mf-body">
+        <div class="mf-field">
+            <label>📦 Consumo de areia — Galpão PIAL (silos)</label>
+            <div class="dash-cards">
+                <div class="dash-card" style="flex:1;">
+                    <div class="dash-card-titulo">Volume atual</div>
+                    <div class="dash-card-valor" id="volumePialAtual">-- m³</div>
+                    <div class="dash-card-linha" id="volumePialHoje">Hoje: --</div>
+                    <div class="dash-card-linha" id="volumePialSemana">7 dias: --</div>
+                    <div class="dash-card-linha" id="volumePialMes">30 dias: --</div>
+                </div>
+            </div>
+        </div>
+        <div class="mf-field">
+            <canvas id="graficoVolume" height="160"></canvas>
+        </div>
+
+        <div class="mf-field">
+            <label>❌ Equipamentos com defeito por dia</label>
+            <canvas id="graficoPercentualDefeito" height="160"></canvas>
+        </div>
+
+        <div class="mf-field">
+            <label>Equipamentos que mais aparecem</label>
+            <canvas id="graficoEquipamentos" height="160"></canvas>
+        </div>
+
+        <div class="mf-field">
+            <label>⏳ Parados há mais de 30 dias</label>
+            <canvas id="graficoParados30Dias" height="160"></canvas>
+        </div>
+
+        <button class="btn btn-success" id="baixarExcelBtn" style="width:100%; justify-content:center; padding:12px;" disabled>⬇️ Baixar histórico em Excel</button>
+
+        <div class="mf-field">
+            <div class="mf-lista-titulo" style="margin-bottom:8px;">Relatórios compartilhados <span class="contador" id="contadorHistorico"></span></div>
+            <div id="listaHistorico">
+                <div class="pendencia-vazio">Carregando...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Firebase: sincroniza pendências e status das linhas entre todos os usuários -->
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, updateDoc, deleteField, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, updateDoc, deleteField, getDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, where } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyATcDCKHfO1Z9-miHvBagJtMrFvV28IKHA",
@@ -607,6 +692,32 @@ body {
             console.error("Erro ao buscar do Firestore:", e);
             if (typeof window.avisarErroSincronizacao === 'function') window.avisarErroSincronizacao();
             throw e;
+        });
+    };
+
+    // Salva um novo registro no histórico toda vez que um relatório é compartilhado.
+    // Cada compartilhamento vira um documento NOVO (nunca sobrescreve os anteriores).
+    const historicoRef = collection(db, "historico_relatorios");
+    window.firestoreSalvarHistorico = function(dados) {
+        return addDoc(historicoRef, dados).catch(function(e) {
+            console.error("Erro ao salvar histórico:", e);
+            if (typeof window.avisarErroSincronizacao === 'function') window.avisarErroSincronizacao();
+        });
+    };
+
+    // Busca os relatórios dos últimos 6 meses, do mais recente para o mais antigo.
+    // (Limitar o período mantém o app rápido e o consumo do Firestore controlado
+    // mesmo depois de anos de uso — dados mais antigos podem ser limpos pelo botão
+    // de manutenção, sem precisar apagar tudo manualmente no console do Firebase.)
+    window.firestoreBuscarHistorico = function() {
+        const seisMesesAtras = Date.now() - (6 * 30 * 24 * 60 * 60 * 1000);
+        const q = query(historicoRef, where("quando", ">=", seisMesesAtras), orderBy("quando", "desc"));
+        return getDocs(q).then(function(snapshot) {
+            return snapshot.docs.map(function(d) { return d.data(); });
+        }).catch(function(e) {
+            console.error("Erro ao buscar histórico:", e);
+            if (typeof window.avisarErroSincronizacao === 'function') window.avisarErroSincronizacao();
+            return [];
         });
     };
 
@@ -1357,8 +1468,47 @@ const MAPA_NIVEL_AREIA = {
     "SILO1 NÍVEL CHEIO": { "x": 795, "y": 1315 }
 };
 
+// --- Capacidades em m³ por ponto de nível, para o cálculo de volume no Dashboard ---
+// Cada ponto marcado como "cheio" contribui com a fração indicada da capacidade
+// TOTAL daquele equipamento. Ex: um silo de 1,5 m³ com 2 marcações (BAIXO/CHEIO)
+// tem cada marcação valendo metade (0,75 m³ cada).
+const CAPACIDADE_M3 = {};
+(function montarCapacidades() {
+    // MOEGA: marcação única, 30 m³ cheio.
+    CAPACIDADE_M3["MOEGA"] = 30;
+
+    // SILO 01: 3 marcações, 40 m³ no total — cada uma vale 1/3.
+    const tercoSilo01 = 40 / 3;
+    CAPACIDADE_M3["SILO1 PRIMEIRO NÍVEL"] = tercoSilo01;
+    CAPACIDADE_M3["SILO1 SEGUNDO NÍVEL"] = tercoSilo01;
+    CAPACIDADE_M3["SILO1 NÍVEL CHEIO"] = tercoSilo01;
+
+    // VAS do galpão areeiro (17, 18, 19): 1,1 m³ cada, marcação única.
+    ["VAS 17", "VAS 18", "VAS 19"].forEach(nome => { CAPACIDADE_M3[nome] = 1.1; });
+
+    // SILOS de 2 a 13: 1,5 m³ cada, 2 marcações (BAIXO/CHEIO) — cada uma vale metade.
+    const metadeSilo = 1.5 / 2;
+    for (let n = 2; n <= 13; n++) {
+        CAPACIDADE_M3["SILO" + n + " NÍVEL BAIXO"] = metadeSilo;
+        CAPACIDADE_M3["SILO" + n + " NÍVEL CHEIO"] = metadeSilo;
+    }
+
+    // Todos os demais VAS (dentro do galpão PIAL): 0,095 m³ cada, marcação única.
+    Object.keys(MAPA_NIVEL_AREIA).forEach(function(nome) {
+        if (CAPACIDADE_M3[nome] === undefined && nome.indexOf("VAS") === 0) {
+            CAPACIDADE_M3[nome] = 0.095;
+        }
+    });
+})();
+
+// --- Agrupamento por galpão, para separar o volume de areia em 2 zonas ---
+const GALPAO_AREEIRO = ["SILO1 PRIMEIRO NÍVEL", "SILO1 SEGUNDO NÍVEL", "SILO1 NÍVEL CHEIO", "MOEGA", "VAS 17", "VAS 18", "VAS 19"];
+// Volume do Galpão PIAL considera só os SILOS (2 a 13) — os vasos (VAS) não entram na conta de volume.
+const GALPAO_PIAL = Object.keys(MAPA_NIVEL_AREIA).filter(nome => nome.indexOf("SILO") === 0 && GALPAO_AREEIRO.indexOf(nome) === -1);
+
 // Guarda o status de cada linha ("operacional" ou "parada") para sincronizar com o Firestore.
 let estadoLinhas = {};
+
 // Guarda o status de cada ponto de nível de areia ("cheio" ou "vazio") para sincronizar com o Firestore.
 let estadoNivelAreia = {};
 let aplicandoAtualizacaoRemota = false; // evita loop ao reaplicar dados recebidos do servidor
@@ -1806,6 +1956,289 @@ fecharDefeitosBtn.addEventListener('click', () => {
     modalDefeitos.style.display = 'none';
 });
 
+// ==================== HISTÓRICO DE RELATÓRIOS COMPARTILHADOS ====================
+const modalHistorico = document.getElementById('modalHistorico');
+const historicoBtn = document.getElementById('historicoBtn');
+const fecharHistoricoBtn = document.getElementById('fecharHistoricoBtn');
+const baixarExcelBtn = document.getElementById('baixarExcelBtn');
+let historicoCarregado = []; // guarda o último histórico buscado, para o botão de Excel usar
+let graficosHistorico = {}; // guarda as instâncias do Chart.js, para poder destruir e recriar
+
+// Chamada toda vez que um relatório é compartilhado — cria um registro NOVO
+// (nunca sobrescreve os anteriores), com uma "foto" de tudo naquele momento.
+function salvarHistoricoRelatorio() {
+    if (typeof window.firestoreSalvarHistorico !== 'function') return;
+    window.firestoreSalvarHistorico({
+        quando: Date.now(),
+        autor: nomeUsuario || 'Anônimo',
+        pendencias: pendencias.map(p => Object.assign({}, p)),
+        linhas: Object.assign({}, estadoLinhas),
+        niveis: Object.assign({}, estadoNivelAreia)
+    });
+}
+
+// Reconstrói uma linha do tempo com UM registro por dia (o último relatório
+// daquele dia). Dias sem nenhum compartilhamento repetem o último conhecido.
+function construirLinhaDoTempoDiaria(lista) {
+    const porDia = {};
+    lista.forEach(function(registro) {
+        const d = new Date(registro.quando);
+        const chave = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        if (!porDia[chave] || registro.quando > porDia[chave].quando) {
+            porDia[chave] = registro;
+        }
+    });
+
+    const chaves = Object.keys(porDia).sort();
+    if (chaves.length === 0) return [];
+
+    const linha = [];
+    const primeiraData = new Date(chaves[0] + 'T00:00:00');
+    const ultimaData = new Date(chaves[chaves.length - 1] + 'T00:00:00');
+    let ultimoConhecido = null;
+
+    for (let d = new Date(primeiraData); d <= ultimaData; d.setDate(d.getDate() + 1)) {
+        const chave = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        if (porDia[chave]) ultimoConhecido = porDia[chave];
+        linha.push({
+            dataChave: chave,
+            dataExibicao: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+            niveis: ultimoConhecido ? (ultimoConhecido.niveis || {}) : {},
+            pendencias: ultimoConhecido ? (ultimoConhecido.pendencias || []) : []
+        });
+    }
+    return linha;
+}
+
+function calcularVolumeZona(niveis, listaPontos) {
+    let total = 0;
+    listaPontos.forEach(function(nome) {
+        if (niveis[nome] === 'cheio') total += CAPACIDADE_M3[nome] || 0;
+    });
+    return Math.round(total * 100) / 100;
+}
+
+// Para cada equipamento com defeito no relatório mais recente, conta há quantos
+// dias consecutivos ele está parado (sem voltar pro verde), olhando a linha do
+// tempo diária de trás pra frente.
+function calcularDiasParado(linha) {
+    const resultado = {};
+    if (linha.length === 0) return resultado;
+    const atuaisComDefeito = new Set((linha[linha.length - 1].pendencias || []).map(p => p.equipamento));
+
+    atuaisComDefeito.forEach(function(eq) {
+        let dias = 0;
+        for (let i = linha.length - 1; i >= 0; i--) {
+            const setDoDia = new Set((linha[i].pendencias || []).map(p => p.equipamento));
+            if (setDoDia.has(eq)) dias++; else break;
+        }
+        resultado[eq] = dias;
+    });
+    return resultado;
+}
+
+function formatarDelta(valor) {
+    const arredondado = Math.round(valor * 100) / 100;
+    if (arredondado === 0) return '<span>0 m³</span>';
+    const classe = arredondado > 0 ? 'dash-positivo' : 'dash-negativo';
+    const seta = arredondado > 0 ? '▲' : '▼';
+    return '<span class="' + classe + '">' + seta + ' ' + Math.abs(arredondado) + ' m³</span>';
+}
+
+historicoBtn.addEventListener('click', () => {
+    modalHistorico.style.display = 'flex';
+    document.getElementById('listaHistorico').innerHTML = '<div class="pendencia-vazio">Carregando...</div>';
+    baixarExcelBtn.disabled = true;
+    if (typeof window.firestoreBuscarHistorico !== 'function') return;
+    window.firestoreBuscarHistorico().then(function(lista) {
+        historicoCarregado = lista;
+        const linhaDiaria = construirLinhaDoTempoDiaria(lista);
+        renderizarCartaoVolumePial(linhaDiaria);
+        renderizarListaHistorico(lista);
+        renderizarGraficosHistorico(lista, linhaDiaria);
+        baixarExcelBtn.disabled = lista.length === 0;
+    });
+});
+
+fecharHistoricoBtn.addEventListener('click', () => {
+    modalHistorico.style.display = 'none';
+});
+
+function renderizarCartaoVolumePial(linha) {
+    if (linha.length === 0) {
+        document.getElementById('volumePialAtual').textContent = '-- m³';
+        return;
+    }
+    const volumeHoje = calcularVolumeZona(linha[linha.length - 1].niveis, GALPAO_PIAL);
+    document.getElementById('volumePialAtual').textContent = volumeHoje + ' m³';
+
+    function deltaNoPeriodo(diasAtras) {
+        const idx = linha.length - 1 - diasAtras;
+        const valorAntigo = idx >= 0 ? calcularVolumeZona(linha[idx].niveis, GALPAO_PIAL) : volumeHoje;
+        return volumeHoje - valorAntigo;
+    }
+
+    document.getElementById('volumePialHoje').innerHTML = 'Hoje: ' + formatarDelta(deltaNoPeriodo(1));
+    document.getElementById('volumePialSemana').innerHTML = '7 dias: ' + formatarDelta(deltaNoPeriodo(7));
+    document.getElementById('volumePialMes').innerHTML = '30 dias: ' + formatarDelta(deltaNoPeriodo(30));
+}
+
+function renderizarListaHistorico(lista) {
+    const container = document.getElementById('listaHistorico');
+    document.getElementById('contadorHistorico').textContent = lista.length > 0 ? '(' + lista.length + ')' : '';
+    container.innerHTML = '';
+
+    if (lista.length === 0) {
+        container.innerHTML = '<div class="pendencia-vazio">Nenhum relatório compartilhado ainda.</div>';
+        return;
+    }
+
+    lista.forEach(function(registro) {
+        const dataFormatada = new Date(registro.quando).toLocaleString('pt-BR');
+        const totalItens = (registro.pendencias || []).length;
+
+        const item = document.createElement('div');
+        item.className = 'pendencia-item';
+
+        const cabecalho = document.createElement('div');
+        cabecalho.className = 'pendencia-top-row';
+        cabecalho.innerHTML = '<span class="pendencia-texto"><b>' + escapeHTML(dataFormatada) + '</b> — ' +
+            escapeHTML(registro.autor || 'Anônimo') + ' (' + totalItens + ' ' + (totalItens === 1 ? 'item' : 'itens') + ')</span>';
+
+        item.appendChild(cabecalho);
+
+        if (totalItens > 0) {
+            const detalhes = document.createElement('div');
+            detalhes.style.marginTop = '6px';
+            detalhes.style.fontSize = '13px';
+            detalhes.style.color = 'var(--text-muted)';
+            detalhes.innerHTML = (registro.pendencias || []).map(function(p) {
+                return '• <b style="color:#ffb84d;">' + escapeHTML(p.equipamento) + '</b>: ' + escapeHTML(p.defeito);
+            }).join('<br>');
+            item.appendChild(detalhes);
+        }
+
+        container.appendChild(item);
+    });
+}
+
+function renderizarGraficosHistorico(lista, linhaDiaria) {
+    // Destrói os gráficos antigos antes de recriar (evita sobreposição visual).
+    Object.keys(graficosHistorico).forEach(function(k) { graficosHistorico[k].destroy(); });
+
+    const labelsDiarios = linhaDiaria.map(d => d.dataExibicao);
+
+    // --- Gráfico 1: volume de areia (Galpão PIAL) ao longo do tempo ---
+    graficosHistorico.volume = new Chart(document.getElementById('graficoVolume'), {
+        type: 'line',
+        data: {
+            labels: labelsDiarios,
+            datasets: [{ label: 'Galpão PIAL (m³)', data: linhaDiaria.map(d => calcularVolumeZona(d.niveis, GALPAO_PIAL)), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.12)', tension: 0.2, fill: true }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#a0a0a0', font: { size: 9 } }, grid: { color: '#333' } },
+                y: { ticks: { color: '#a0a0a0' }, grid: { color: '#333' }, beginAtZero: true }
+            }
+        }
+    });
+
+    // --- Gráfico 2: quantidade de equipamentos com defeito por dia (barras) ---
+    const quantidades = linhaDiaria.map(function(d) {
+        return new Set((d.pendencias || []).map(p => p.equipamento)).size;
+    });
+    graficosHistorico.percentual = new Chart(document.getElementById('graficoPercentualDefeito'), {
+        type: 'bar',
+        data: {
+            labels: labelsDiarios,
+            datasets: [{ label: 'Equipamentos com defeito', data: quantidades, backgroundColor: '#dc2626' }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#a0a0a0', font: { size: 9 } }, grid: { display: false } },
+                y: { ticks: { color: '#a0a0a0', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true }
+            }
+        }
+    });
+
+    // --- Gráfico 3: equipamentos que mais aparecem (top 8) ---
+    const contagemEquip = {};
+    lista.forEach(function(r) {
+        (r.pendencias || []).forEach(function(p) {
+            contagemEquip[p.equipamento] = (contagemEquip[p.equipamento] || 0) + 1;
+        });
+    });
+    const topEquip = Object.entries(contagemEquip).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    graficosHistorico.equip = new Chart(document.getElementById('graficoEquipamentos'), {
+        type: 'bar',
+        data: {
+            labels: topEquip.map(e => e[0]),
+            datasets: [{ label: 'Ocorrências', data: topEquip.map(e => e[1]), backgroundColor: '#3b82f6' }]
+        },
+        options: {
+            responsive: true,
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#a0a0a0', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true },
+                y: { ticks: { color: '#a0a0a0', font: { size: 10 } }, grid: { display: false } }
+            }
+        }
+    });
+
+    // --- Gráfico 4: equipamentos parados há mais de 30 dias ---
+    const diasParado = calcularDiasParado(linhaDiaria);
+    const parados30 = Object.entries(diasParado).filter(e => e[1] > 30).sort((a, b) => b[1] - a[1]);
+    graficosHistorico.parados30 = new Chart(document.getElementById('graficoParados30Dias'), {
+        type: 'bar',
+        data: {
+            labels: parados30.map(e => e[0]),
+            datasets: [{ label: 'Dias parado', data: parados30.map(e => e[1]), backgroundColor: '#dc2626' }]
+        },
+        options: {
+            responsive: true,
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#a0a0a0', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true },
+                y: { ticks: { color: '#a0a0a0', font: { size: 10 } }, grid: { display: false } }
+            }
+        }
+    });
+
+    }
+
+baixarExcelBtn.addEventListener('click', function() {
+    if (historicoCarregado.length === 0) return;
+
+    const linhas = [];
+    historicoCarregado.forEach(function(registro) {
+        const dataFormatada = new Date(registro.quando).toLocaleString('pt-BR');
+        if ((registro.pendencias || []).length === 0) {
+            linhas.push({ 'Data do relatório': dataFormatada, 'Compartilhado por': registro.autor || 'Anônimo', 'Equipamento': '', 'Defeito': '', 'Nota': '' });
+        } else {
+            registro.pendencias.forEach(function(p) {
+                linhas.push({
+                    'Data do relatório': dataFormatada,
+                    'Compartilhado por': registro.autor || 'Anônimo',
+                    'Equipamento': p.equipamento,
+                    'Defeito': p.defeito,
+                    'Nota': p.nota || ''
+                });
+            });
+        }
+    });
+
+    const planilha = XLSX.utils.json_to_sheet(linhas);
+    const livro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(livro, planilha, 'Histórico');
+    XLSX.writeFile(livro, 'historico_sistema_areia_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+});
+
 // --- Compartilhamento (imagem do mapa + lista de defeitos juntos) ---
 function gerarMensagemRelatorio() {
     const hoje = new Date().toLocaleDateString('pt-BR');
@@ -1839,6 +2272,8 @@ function baixarImagemAtual(nomeArquivo) {
 }
 
 async function compartilharRelatorio() {
+    salvarHistoricoRelatorio();
+
     const mensagem = gerarMensagemRelatorio();
     const nomeArquivo = 'status_areeiro_' + new Date().toISOString().slice(0, 10) + '.png';
 

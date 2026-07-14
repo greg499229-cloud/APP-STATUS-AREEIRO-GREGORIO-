@@ -1968,12 +1968,21 @@ let graficosHistorico = {}; // guarda as instâncias do Chart.js, para poder des
 // (nunca sobrescreve os anteriores), com uma "foto" de tudo naquele momento.
 function salvarHistoricoRelatorio() {
     if (typeof window.firestoreSalvarHistorico !== 'function') return;
+
+    // Só os níveis dos 12 silos (GALPAO_PIAL) entram no histórico — são os únicos
+    // realmente usados no cálculo de volume/consumo. VAS, Moega e Silo 01 não
+    // precisam ser gravados aqui, e isso reduz bastante o tamanho do documento.
+    const niveisRelevantes = {};
+    GALPAO_PIAL.forEach(function(nome) {
+        if (estadoNivelAreia[nome] !== undefined) niveisRelevantes[nome] = estadoNivelAreia[nome];
+    });
+
     window.firestoreSalvarHistorico({
         quando: Date.now(),
         autor: nomeUsuario || 'Anônimo',
         pendencias: pendencias.map(p => Object.assign({}, p)),
         linhas: Object.assign({}, estadoLinhas),
-        niveis: Object.assign({}, estadoNivelAreia)
+        niveis: niveisRelevantes
     });
 }
 

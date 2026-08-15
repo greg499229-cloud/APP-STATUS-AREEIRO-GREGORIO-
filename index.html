@@ -318,6 +318,61 @@ body {
     padding: 8px 0;
 }
 
+/* ====== Aguardando manutenção: cards de alerta (vermelho, com badge de dias) ====== */
+.aguardando-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #2a1a1a;
+    border: 1px solid #4d2626;
+    border-left: 4px solid #dc2626;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+.aguardando-icone { font-size: 18px; flex-shrink: 0; }
+.aguardando-texto { flex: 1; overflow-wrap: break-word; }
+.aguardando-texto b { color: #ff8a8a; }
+.aguardando-desde { color: var(--text-muted); font-size: 12px; }
+.aguardando-dias-badge {
+    flex-shrink: 0;
+    background: #dc2626;
+    color: #fff;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+/* ====== Relatórios compartilhados: cards neutros/compactos, estilo linha do tempo ====== */
+.historico-item {
+    background: #1a2028;
+    border: 1px solid #2a3442;
+    border-left: 3px solid #3b82f6;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.historico-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.historico-data { color: #7fb0f5; font-weight: 700; }
+.historico-autor { color: var(--text-muted); }
+.historico-detalhes {
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px dashed #2a3442;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
 /* ====== MODAL FULLSCREEN DE DEFEITOS ====== */
 .modal-fullscreen {
     display: none;
@@ -339,7 +394,20 @@ body {
     flex-shrink: 0;
 }
 
-.mf-title { font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+.mf-title { font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; flex: 1; }
+
+.mf-tela-cheia {
+    background: #2a2a2a;
+    border: 1px solid var(--border-color);
+    color: white;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.mf-tela-cheia.ativo { background: #3b82f6; border-color: #3b82f6; }
 
 .mf-voltar {
     background: #2a2a2a;
@@ -596,6 +664,7 @@ body {
     <div class="mf-header">
         <button class="mf-voltar" id="fecharHistoricoBtn">← Voltar</button>
         <span class="mf-title">📜 Histórico de Relatórios</span>
+        <button class="mf-tela-cheia" id="telaCheiaHistoricoBtn" title="Tela cheia">⛶</button>
     </div>
 
     <div class="mf-body">
@@ -621,13 +690,10 @@ body {
         </div>
 
         <div class="mf-field">
-            <label>Equipamentos que mais aparecem</label>
-            <canvas id="graficoEquipamentos" height="160"></canvas>
-        </div>
-
-        <div class="mf-field">
-            <label>⏳ Parados há mais de 30 dias</label>
-            <canvas id="graficoParados30Dias" height="160"></canvas>
+            <label>⏳ Aguardando manutenção</label>
+            <div id="listaAguardando">
+                <div class="pendencia-vazio">Nenhum equipamento com defeito no último relatório.</div>
+            </div>
         </div>
 
         <button class="btn btn-success" id="baixarExcelBtn" style="width:100%; justify-content:center; padding:12px;" disabled>⬇️ Baixar histórico em Excel</button>
@@ -2027,21 +2093,25 @@ function calcularVolumeZona(niveis, listaPontos) {
     return Math.round(total * 100) / 100;
 }
 
-// Para cada equipamento com defeito no relatório mais recente, conta há quantos
-// dias consecutivos ele está parado (sem voltar pro verde), olhando a linha do
-// tempo diária de trás pra frente.
-function calcularDiasParado(linha) {
+// Para cada equipamento com defeito no relatório mais recente, acha a data em
+// que ele passou a aparecer continuamente (sem voltar pro verde), olhando a
+// linha do tempo diária de trás pra frente.
+function calcularAguardandoDesde(linha) {
     const resultado = {};
     if (linha.length === 0) return resultado;
     const atuaisComDefeito = new Set((linha[linha.length - 1].pendencias || []).map(p => p.equipamento));
 
     atuaisComDefeito.forEach(function(eq) {
+        let dataInicio = linha[linha.length - 1].dataExibicao;
         let dias = 0;
         for (let i = linha.length - 1; i >= 0; i--) {
             const setDoDia = new Set((linha[i].pendencias || []).map(p => p.equipamento));
-            if (setDoDia.has(eq)) dias++; else break;
+            if (setDoDia.has(eq)) {
+                dataInicio = linha[i].dataExibicao;
+                dias++;
+            } else break;
         }
-        resultado[eq] = dias;
+        resultado[eq] = { desde: dataInicio, dias: dias };
     });
     return resultado;
 }
@@ -2062,7 +2132,7 @@ historicoBtn.addEventListener('click', () => {
     window.firestoreBuscarHistorico().then(function(lista) {
         historicoCarregado = lista;
         const linhaDiaria = construirLinhaDoTempoDiaria(lista);
-        renderizarCartaoVolumePial(linhaDiaria);
+        renderizarCartaoVolumePial(lista);
         renderizarListaHistorico(lista);
         renderizarGraficosHistorico(lista, linhaDiaria);
         baixarExcelBtn.disabled = lista.length === 0;
@@ -2073,23 +2143,103 @@ fecharHistoricoBtn.addEventListener('click', () => {
     modalHistorico.style.display = 'none';
 });
 
-function renderizarCartaoVolumePial(linha) {
-    if (linha.length === 0) {
+// --- Tela cheia da aba Histórico (Fullscreen API, com fallbacks de navegador) ---
+const telaCheiaHistoricoBtn = document.getElementById('telaCheiaHistoricoBtn');
+
+function elementoEstaEmTelaCheia() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function atualizarBotaoTelaCheia() {
+    const ativo = elementoEstaEmTelaCheia();
+    telaCheiaHistoricoBtn.textContent = ativo ? '✕' : '⛶';
+    telaCheiaHistoricoBtn.title = ativo ? 'Sair da tela cheia' : 'Tela cheia';
+    telaCheiaHistoricoBtn.classList.toggle('ativo', ativo);
+}
+
+telaCheiaHistoricoBtn.addEventListener('click', () => {
+    if (!elementoEstaEmTelaCheia()) {
+        const pedir = modalHistorico.requestFullscreen || modalHistorico.webkitRequestFullscreen;
+        if (pedir) {
+            pedir.call(modalHistorico).catch(function() {
+                // Alguns navegadores (ex.: Safari iOS) não suportam a Fullscreen API
+                // nesse elemento; o modal já ocupa 100% da tela mesmo assim.
+            });
+        }
+    } else {
+        const sair = document.exitFullscreen || document.webkitExitFullscreen;
+        if (sair) sair.call(document);
+    }
+});
+
+document.addEventListener('fullscreenchange', atualizarBotaoTelaCheia);
+document.addEventListener('webkitfullscreenchange', atualizarBotaoTelaCheia);
+
+// Acha, dentro da lista de relatórios reais (com timestamp), o mais recente
+// que aconteceu em ou antes de um instante alvo. Nunca "olha pra frente".
+function encontrarIndiceBaseline(ordenados, instanteAlvo) {
+    let baselineIdx = -1;
+    for (let i = 0; i < ordenados.length; i++) {
+        if (ordenados[i].quando <= instanteAlvo) baselineIdx = i; else break;
+    }
+    return baselineIdx;
+}
+
+// Soma o consumo real de areia dentro de uma janela de dias: percorre os
+// relatórios em ordem cronológica e, entre cada par consecutivo, checa
+// NÍVEL POR NÍVEL (não o volume total do silo). Cada nível vale sua fração
+// de capacidade (ex.: NÍVEL BAIXO = 50%, NÍVEL CHEIO = 50%).
+// - Nível estava 'cheio' e deixou de estar → soma a capacidade dele (saída).
+// - Nível passou a 'cheio' (reabastecimento) → ignora, não soma nem subtrai.
+// Por isso o total só cresce (ou mantém) conforme a janela aumenta: 7 dias
+// nunca fica menor que hoje, e 30 dias nunca fica menor que 7 dias.
+function consumoAcumulado(lista, agora, diasAtras) {
+    const instanteAlvo = agora - diasAtras * 24 * 60 * 60 * 1000;
+    const ordenados = lista.slice().sort((a, b) => a.quando - b.quando);
+    const baselineIdx = encontrarIndiceBaseline(ordenados, instanteAlvo);
+    if (baselineIdx === -1) return null; // não há nenhum relatório antes do início do período
+
+    let totalConsumido = 0;
+    for (let i = baselineIdx; i < ordenados.length - 1; i++) {
+        const niveisAntes = ordenados[i].niveis || {};
+        const niveisDepois = ordenados[i + 1].niveis || {};
+        GALPAO_PIAL.forEach(function(nomeNivel) {
+            const estavaCheio = niveisAntes[nomeNivel] === 'cheio';
+            const continuaCheio = niveisDepois[nomeNivel] === 'cheio';
+            if (estavaCheio && !continuaCheio) {
+                totalConsumido += CAPACIDADE_M3[nomeNivel] || 0;
+            }
+        });
+    }
+    return Math.round(totalConsumido * 100) / 100;
+}
+
+function renderizarCartaoVolumePial(lista) {
+    if (lista.length === 0) {
         document.getElementById('volumePialAtual').textContent = '-- m³';
+        document.getElementById('volumePialHoje').innerHTML = 'Hoje: --';
+        document.getElementById('volumePialSemana').innerHTML = '7 dias: --';
+        document.getElementById('volumePialMes').innerHTML = '30 dias: --';
         return;
     }
-    const volumeHoje = calcularVolumeZona(linha[linha.length - 1].niveis, GALPAO_PIAL);
+
+    // Relatório mais recente = "agora". Usamos o timestamp real dele (e não
+    // Date.now()) como referência dos períodos, pra funcionar igual não importa
+    // se os lançamentos são diários, a cada 2 dias, ou esporádicos.
+    const maisRecente = lista.reduce((a, b) => (a.quando > b.quando ? a : b));
+    const volumeHoje = calcularVolumeZona(maisRecente.niveis, GALPAO_PIAL);
     document.getElementById('volumePialAtual').textContent = volumeHoje + ' m³';
 
-    function deltaNoPeriodo(diasAtras) {
-        const idx = linha.length - 1 - diasAtras;
-        const valorAntigo = idx >= 0 ? calcularVolumeZona(linha[idx].niveis, GALPAO_PIAL) : volumeHoje;
-        return volumeHoje - valorAntigo;
+    function formatarConsumoOuVazio(diasAtras) {
+        const consumo = consumoAcumulado(lista, maisRecente.quando, diasAtras);
+        if (consumo === null) return '<span style="color:var(--text-muted);">sem dados</span>';
+        if (consumo === 0) return '<span>0 m³</span>';
+        return '<span class="dash-negativo">▼ ' + consumo + ' m³</span>';
     }
 
-    document.getElementById('volumePialHoje').innerHTML = 'Hoje: ' + formatarDelta(deltaNoPeriodo(1));
-    document.getElementById('volumePialSemana').innerHTML = '7 dias: ' + formatarDelta(deltaNoPeriodo(7));
-    document.getElementById('volumePialMes').innerHTML = '30 dias: ' + formatarDelta(deltaNoPeriodo(30));
+    document.getElementById('volumePialHoje').innerHTML = 'Hoje: ' + formatarConsumoOuVazio(1);
+    document.getElementById('volumePialSemana').innerHTML = '7 dias: ' + formatarConsumoOuVazio(7);
+    document.getElementById('volumePialMes').innerHTML = '30 dias: ' + formatarConsumoOuVazio(30);
 }
 
 function renderizarListaHistorico(lista) {
@@ -2107,20 +2257,19 @@ function renderizarListaHistorico(lista) {
         const totalItens = (registro.pendencias || []).length;
 
         const item = document.createElement('div');
-        item.className = 'pendencia-item';
+        item.className = 'historico-item';
 
         const cabecalho = document.createElement('div');
-        cabecalho.className = 'pendencia-top-row';
-        cabecalho.innerHTML = '<span class="pendencia-texto"><b>' + escapeHTML(dataFormatada) + '</b> — ' +
-            escapeHTML(registro.autor || 'Anônimo') + ' (' + totalItens + ' ' + (totalItens === 1 ? 'item' : 'itens') + ')</span>';
+        cabecalho.className = 'historico-top-row';
+        cabecalho.innerHTML = '<span><span class="historico-data">' + escapeHTML(dataFormatada) + '</span> — ' +
+            '<span class="historico-autor">' + escapeHTML(registro.autor || 'Anônimo') + '</span></span>' +
+            '<span class="historico-autor">' + totalItens + ' ' + (totalItens === 1 ? 'item' : 'itens') + '</span>';
 
         item.appendChild(cabecalho);
 
         if (totalItens > 0) {
             const detalhes = document.createElement('div');
-            detalhes.style.marginTop = '6px';
-            detalhes.style.fontSize = '13px';
-            detalhes.style.color = 'var(--text-muted)';
+            detalhes.className = 'historico-detalhes';
             detalhes.innerHTML = (registro.pendencias || []).map(function(p) {
                 return '• <b style="color:#ffb84d;">' + escapeHTML(p.equipamento) + '</b>: ' + escapeHTML(p.defeito);
             }).join('<br>');
@@ -2174,52 +2323,31 @@ function renderizarGraficosHistorico(lista, linhaDiaria) {
         }
     });
 
-    // --- Gráfico 3: equipamentos que mais aparecem (top 8) ---
-    const contagemEquip = {};
-    lista.forEach(function(r) {
-        (r.pendencias || []).forEach(function(p) {
-            contagemEquip[p.equipamento] = (contagemEquip[p.equipamento] || 0) + 1;
-        });
-    });
-    const topEquip = Object.entries(contagemEquip).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    graficosHistorico.equip = new Chart(document.getElementById('graficoEquipamentos'), {
-        type: 'bar',
-        data: {
-            labels: topEquip.map(e => e[0]),
-            datasets: [{ label: 'Ocorrências', data: topEquip.map(e => e[1]), backgroundColor: '#3b82f6' }]
-        },
-        options: {
-            responsive: true,
-            indexAxis: 'y',
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { ticks: { color: '#a0a0a0', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true },
-                y: { ticks: { color: '#a0a0a0', font: { size: 10 } }, grid: { display: false } }
-            }
-        }
-    });
-
-    // --- Gráfico 4: equipamentos parados há mais de 30 dias ---
-    const diasParado = calcularDiasParado(linhaDiaria);
-    const parados30 = Object.entries(diasParado).filter(e => e[1] > 30).sort((a, b) => b[1] - a[1]);
-    graficosHistorico.parados30 = new Chart(document.getElementById('graficoParados30Dias'), {
-        type: 'bar',
-        data: {
-            labels: parados30.map(e => e[0]),
-            datasets: [{ label: 'Dias parado', data: parados30.map(e => e[1]), backgroundColor: '#dc2626' }]
-        },
-        options: {
-            responsive: true,
-            indexAxis: 'y',
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { ticks: { color: '#a0a0a0', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true },
-                y: { ticks: { color: '#a0a0a0', font: { size: 10 } }, grid: { display: false } }
-            }
-        }
-    });
+    renderizarListaAguardando(linhaDiaria);
 
     }
+
+function renderizarListaAguardando(linha) {
+    const container = document.getElementById('listaAguardando');
+    const aguardando = calcularAguardandoDesde(linha);
+    const ordenado = Object.entries(aguardando).sort((a, b) => b[1].dias - a[1].dias);
+
+    container.innerHTML = '';
+    if (ordenado.length === 0) {
+        container.innerHTML = '<div class="pendencia-vazio">Nenhum equipamento com defeito no último relatório.</div>';
+        return;
+    }
+    ordenado.forEach(function(item) {
+        const nome = item[0], info = item[1];
+        const div = document.createElement('div');
+        div.className = 'aguardando-item';
+        div.innerHTML = '<span class="aguardando-icone">🛠️</span>' +
+            '<span class="aguardando-texto"><b>' + escapeHTML(nome) + '</b> ' +
+            '<span class="aguardando-desde">aguardando manutenção desde ' + escapeHTML(info.desde) + '</span></span>' +
+            '<span class="aguardando-dias-badge">' + info.dias + (info.dias === 1 ? ' dia' : ' dias') + '</span>';
+        container.appendChild(div);
+    });
+}
 
 baixarExcelBtn.addEventListener('click', function() {
     if (historicoCarregado.length === 0) return;

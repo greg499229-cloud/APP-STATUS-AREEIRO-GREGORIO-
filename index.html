@@ -6,6 +6,7 @@
 <title>STATUS AREEIRO PIAL</title>
 <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root {
@@ -664,24 +665,36 @@ body {
     <div class="mf-header">
         <button class="mf-voltar" id="fecharHistoricoBtn">← Voltar</button>
         <span class="mf-title">📜 Histórico de Relatórios</span>
+        <button class="mf-tela-cheia" id="compartilharHistoricoBtn" title="Compartilhar">📤</button>
         <button class="mf-tela-cheia" id="telaCheiaHistoricoBtn" title="Tela cheia">⛶</button>
     </div>
 
     <div class="mf-body">
+        <div id="historicoCompartilhavel">
         <div class="mf-field">
             <label>📦 Consumo de areia — Galpão PIAL (silos)</label>
             <div class="dash-cards">
                 <div class="dash-card" style="flex:1;">
-                    <div class="dash-card-titulo">Volume atual</div>
-                    <div class="dash-card-valor" id="volumePialAtual">-- m³</div>
+                    <div class="dash-card-titulo">📉 Consumo de areia</div>
                     <div class="dash-card-linha" id="volumePialHoje">Hoje: --</div>
                     <div class="dash-card-linha" id="volumePialSemana">7 dias: --</div>
                     <div class="dash-card-linha" id="volumePialMes">30 dias: --</div>
                 </div>
+                <div class="dash-card" style="flex:1;">
+                    <div class="dash-card-titulo">✅ Vasos operacionais no Galpão PIAL</div>
+                    <div class="dash-card-valor" id="pctVasosOperacionaisHoje">-- %</div>
+                    <div class="dash-card-linha" id="pctVasosOperacionaisInfo">--</div>
+                </div>
             </div>
         </div>
         <div class="mf-field">
+            <label>📉 Consumo diário de areia — Galpão PIAL (m³)</label>
             <canvas id="graficoVolume" height="160"></canvas>
+        </div>
+
+        <div class="mf-field">
+            <label>✅ % de vasos operacionais no Galpão PIAL por dia</label>
+            <canvas id="graficoPctVasosOperacionais" height="160"></canvas>
         </div>
 
         <div class="mf-field">
@@ -694,6 +707,7 @@ body {
             <div id="listaAguardando">
                 <div class="pendencia-vazio">Nenhum equipamento com defeito no último relatório.</div>
             </div>
+        </div>
         </div>
 
         <button class="btn btn-success" id="baixarExcelBtn" style="width:100%; justify-content:center; padding:12px;" disabled>⬇️ Baixar histórico em Excel</button>
@@ -2175,6 +2189,52 @@ telaCheiaHistoricoBtn.addEventListener('click', () => {
 document.addEventListener('fullscreenchange', atualizarBotaoTelaCheia);
 document.addEventListener('webkitfullscreenchange', atualizarBotaoTelaCheia);
 
+// --- Compartilhar Histórico (cards + gráficos + aguardando manutenção) como imagem ---
+const compartilharHistoricoBtn = document.getElementById('compartilharHistoricoBtn');
+
+async function compartilharHistoricoComoImagem() {
+    const alvo = document.getElementById('historicoCompartilhavel');
+    const nomeArquivo = 'historico_areeiro_' + new Date().toISOString().slice(0, 10) + '.png';
+
+    let canvasImagem;
+    try {
+        canvasImagem = await html2canvas(alvo, { backgroundColor: '#121212', scale: 2 });
+    } catch (err) {
+        console.error('Falha ao gerar imagem do histórico: ', err);
+        alert('Não foi possível gerar a imagem do histórico.');
+        return;
+    }
+
+    const blob = await new Promise(resolve => canvasImagem.toBlob(resolve, 'image/png'));
+
+    // 1) Tenta compartilhar a imagem via Web Share API (abre o seletor nativo,
+    //    onde o usuário escolhe o WhatsApp ou outro app).
+    try {
+        if (navigator.canShare && navigator.share) {
+            const file = new File([blob], nomeArquivo, { type: 'image/png' });
+            if (navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file], title: 'Histórico de Relatórios' });
+                return;
+            }
+        }
+    } catch (err) {
+        if (err && err.name === 'AbortError') return; // usuário cancelou
+        console.error('Falha ao compartilhar imagem do histórico: ', err);
+    }
+
+    // 2) Sem suporte a compartilhar arquivos: baixa a imagem pro usuário
+    //    anexar manualmente na conversa do WhatsApp.
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = nomeArquivo;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+    alert('A imagem foi baixada como "' + nomeArquivo + '". Anexe esse arquivo manualmente na conversa do WhatsApp.');
+}
+
+compartilharHistoricoBtn.addEventListener('click', compartilharHistoricoComoImagem);
+
 // Acha, dentro da lista de relatórios reais (com timestamp), o mais recente
 // que aconteceu em ou antes de um instante alvo. Nunca "olha pra frente".
 function encontrarIndiceBaseline(ordenados, instanteAlvo) {
@@ -2216,7 +2276,6 @@ function consumoAcumulado(lista, agora, diasAtras) {
 
 function renderizarCartaoVolumePial(lista) {
     if (lista.length === 0) {
-        document.getElementById('volumePialAtual').textContent = '-- m³';
         document.getElementById('volumePialHoje').innerHTML = 'Hoje: --';
         document.getElementById('volumePialSemana').innerHTML = '7 dias: --';
         document.getElementById('volumePialMes').innerHTML = '30 dias: --';
@@ -2227,8 +2286,6 @@ function renderizarCartaoVolumePial(lista) {
     // Date.now()) como referência dos períodos, pra funcionar igual não importa
     // se os lançamentos são diários, a cada 2 dias, ou esporádicos.
     const maisRecente = lista.reduce((a, b) => (a.quando > b.quando ? a : b));
-    const volumeHoje = calcularVolumeZona(maisRecente.niveis, GALPAO_PIAL);
-    document.getElementById('volumePialAtual').textContent = volumeHoje + ' m³';
 
     function formatarConsumoOuVazio(diasAtras) {
         const consumo = consumoAcumulado(lista, maisRecente.quando, diasAtras);
@@ -2286,12 +2343,32 @@ function renderizarGraficosHistorico(lista, linhaDiaria) {
 
     const labelsDiarios = linhaDiaria.map(d => d.dataExibicao);
 
-    // --- Gráfico 1: volume de areia (Galpão PIAL) ao longo do tempo ---
+    // --- Gráfico 1: consumo diário de areia (Galpão PIAL) ---
+    // Mesma regra usada nos cards Hoje/7 dias/30 dias: compara nível por nível
+    // (não o volume total) entre um dia e o anterior. Nível que estava 'cheio'
+    // e deixou de estar = soma a capacidade dele. Nível que passou a 'cheio'
+    // (reabastecimento) não conta nada nesse dia.
+    function consumoEntreDias(niveisAntes, niveisDepois) {
+        const antes = niveisAntes || {};
+        const depois = niveisDepois || {};
+        let total = 0;
+        GALPAO_PIAL.forEach(function(nomeNivel) {
+            const estavaCheio = antes[nomeNivel] === 'cheio';
+            const continuaCheio = depois[nomeNivel] === 'cheio';
+            if (estavaCheio && !continuaCheio) total += CAPACIDADE_M3[nomeNivel] || 0;
+        });
+        return Math.round(total * 100) / 100;
+    }
+    const consumoDiarioPorDia = linhaDiaria.map(function(d, i) {
+        if (i === 0) return 0; // primeiro dia da linha não tem dia anterior pra comparar
+        return consumoEntreDias(linhaDiaria[i - 1].niveis, d.niveis);
+    });
+
     graficosHistorico.volume = new Chart(document.getElementById('graficoVolume'), {
-        type: 'line',
+        type: 'bar',
         data: {
             labels: labelsDiarios,
-            datasets: [{ label: 'Galpão PIAL (m³)', data: linhaDiaria.map(d => calcularVolumeZona(d.niveis, GALPAO_PIAL)), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.12)', tension: 0.2, fill: true }]
+            datasets: [{ label: 'Consumo diário — Galpão PIAL (m³)', data: consumoDiarioPorDia, backgroundColor: '#dc2626' }]
         },
         options: {
             responsive: true,
@@ -2303,7 +2380,56 @@ function renderizarGraficosHistorico(lista, linhaDiaria) {
         }
     });
 
-    // --- Gráfico 2: quantidade de equipamentos com defeito por dia (barras) ---
+    // --- Gráfico 2: % de vasos operacionais no Galpão PIAL por dia ---
+    // "Vaso do Galpão PIAL" = só a faixa VAS 20 a VAS 43 (24 vasos). Os 3
+    // fixos com hífen (VAS-0017/18/19) ficam fora dessa contagem, pois não
+    // são do Galpão PIAL.
+    // Operacional = não aparece na lista de pendências (defeito) daquele dia.
+    const LISTA_VASOS_PIAL = LISTA_VASOS.filter(nome => nome.indexOf('VAS ') === 0);
+    const TOTAL_VASOS = LISTA_VASOS_PIAL.length;
+    function contarVasosComDefeito(pendencias) {
+        const setVasos = new Set(LISTA_VASOS_PIAL);
+        const comDefeito = new Set();
+        (pendencias || []).forEach(function(p) {
+            if (setVasos.has(p.equipamento)) comDefeito.add(p.equipamento);
+        });
+        return comDefeito.size;
+    }
+    const pctOperacionalPorDia = linhaDiaria.map(function(d) {
+        const comDefeito = contarVasosComDefeito(d.pendencias);
+        return Math.round(((TOTAL_VASOS - comDefeito) / TOTAL_VASOS) * 1000) / 10;
+    });
+
+    graficosHistorico.pctVasos = new Chart(document.getElementById('graficoPctVasosOperacionais'), {
+        type: 'line',
+        data: {
+            labels: labelsDiarios,
+            datasets: [{ label: '% Vasos operacionais — Galpão PIAL', data: pctOperacionalPorDia, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.12)', tension: 0.2, fill: true }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#a0a0a0', font: { size: 9 } }, grid: { color: '#333' } },
+                y: { min: 0, max: 100, ticks: { color: '#a0a0a0', callback: v => v + '%' }, grid: { color: '#333' } }
+            }
+        }
+    });
+
+    // Card "Vasos operacionais no Galpão PIAL hoje" — usa o relatório mais recente da lista
+    if (linhaDiaria.length > 0) {
+        const hoje = linhaDiaria[linhaDiaria.length - 1];
+        const defeituososHoje = contarVasosComDefeito(hoje.pendencias);
+        const pctHoje = Math.round(((TOTAL_VASOS - defeituososHoje) / TOTAL_VASOS) * 1000) / 10;
+        document.getElementById('pctVasosOperacionaisHoje').textContent = pctHoje + '%';
+        document.getElementById('pctVasosOperacionaisInfo').textContent =
+            (TOTAL_VASOS - defeituososHoje) + ' de ' + TOTAL_VASOS + ' vasos operacionais no Galpão PIAL';
+    } else {
+        document.getElementById('pctVasosOperacionaisHoje').textContent = '-- %';
+        document.getElementById('pctVasosOperacionaisInfo').textContent = '--';
+    }
+
+    // --- Gráfico 3: quantidade de equipamentos com defeito por dia (barras) ---
     const quantidades = linhaDiaria.map(function(d) {
         return new Set((d.pendencias || []).map(p => p.equipamento)).size;
     });

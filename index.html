@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>STATUS AREEIRO PIAL</title>
+
+<!-- PWA: permite instalar o app na tela inicial do celular -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#121212">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Areeiro PIAL">
+
 <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -550,6 +561,23 @@ body {
 .dash-negativo { color: #dc2626 !important; font-weight: 700; }
 
 #mfOutroWrapper { display: none; }
+
+/* ====== DESKTOP: limita e centraliza o conteúdo em telas grandes ======
+   Só aplica acima de 900px de largura — em celular (a maioria das telas)
+   nada disso é ativado, o layout continua exatamente como antes. */
+@media (min-width: 900px) {
+    body { background: #000; }
+    .app-wrapper {
+        max-width: 720px;
+        margin: 0 auto;
+        box-shadow: 0 0 60px rgba(0, 0, 0, 0.7);
+    }
+    .modal-fullscreen {
+        max-width: 720px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+}
 </style>
 </head>
 <body>
@@ -2592,6 +2620,15 @@ renderizarPendencias();
 
 // Inicialização do mapa
 carregarImagemFixa();
+
+// --- Registro do Service Worker (PWA: permite instalar e abrir offline) ---
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(function(err) {
+            console.error('Falha ao registrar o service worker: ', err);
+        });
+    });
+}
 </script>
 </body>
 </html>
